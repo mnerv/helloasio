@@ -12,25 +12,29 @@
 #include "fmt/format.h"
 #include "asio.hpp"
 
-auto echo(asio::ip::tcp::socket socket) -> asio::awaitable<void> {
+using tcp_acceptor = asio::use_awaitable_t<>::as_default_on_t<asio::ip::tcp::acceptor>;
+using tcp_socket   = asio::use_awaitable_t<>::as_default_on_t<asio::ip::tcp::socket>;
+
+auto echo(tcp_socket socket) -> asio::awaitable<void> {
     try {
         char data[1024];
         for (;;) {
-            std::size_t n = co_await socket.async_read_some(asio::buffer(data), asio::use_awaitable);
-            co_await asio::async_write(socket, asio::buffer(data, n), asio::use_awaitable);
+            std::size_t n = co_await socket.async_read_some(asio::buffer(data));
+            co_await asio::async_write(socket, asio::buffer(data, n));
         }
-    } catch (std::exception& e) {
-        std::printf("echo exception: %s\n", e.what());
+    } catch (asio::system_error const& e) {
+        if (e.code() != asio::error::misc_errors::eof)
+            std::printf("echo exception: %s\n", e.what());
     }
 }
 
 auto listener() -> asio::awaitable<void> {
     auto exe = co_await asio::this_coro::executor;
-    asio::ip::tcp::acceptor acceptor(exe, {asio::ip::tcp::v4(), 3000});
+    tcp_acceptor acceptor(exe, {asio::ip::tcp::v4(), 3000});
     fmt::print("server listening at {}:{}\n", acceptor.local_endpoint().address().to_string(), acceptor.local_endpoint().port());
     for (;;) {
         try {
-            auto socket = co_await acceptor.async_accept(asio::use_awaitable);
+            auto socket = co_await acceptor.async_accept();
             co_spawn(exe, echo(std::move(socket)), asio::detached);
         } catch (std::exception const& e) {
             fmt::print("new connection error: {}\n", e.what());
